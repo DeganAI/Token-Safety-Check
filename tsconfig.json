@@ -1,0 +1,56 @@
+bash
+
+cat > /mnt/user-data/outputs/token-safety-check/tsconfig.json << 'EOFTS'
+{
+  "compilerOptions": {
+    /* Language and Environment */
+    "target": "ES2022",                                  /* Set the JavaScript language version for emitted JavaScript */
+    "lib": ["ES2022"],                                   /* Specify a set of bundled library declaration files */
+    
+    /* Modules */
+    "module": "ESNext",                                  /* Specify what module code is generated */
+    "moduleResolution": "bundler",                       /* Specify how TypeScript looks up a file from a given module specifier */
+    "resolveJsonModule": true,                           /* Enable importing .json files */
+    "allowImportingTsExtensions": true,                  /* Allow imports to include TypeScript file extensions */
+    
+    /* Emit */
+    "noEmit": true,                                      /* Disable emitting files from a compilation (Bun handles this) */
+    "sourceMap": true,                                   /* Create source map files for emitted JavaScript files */
+    
+    /* Interop Constraints */
+    "esModuleInterop": true,                             /* Emit additional JavaScript to ease support for importing CommonJS modules */
+    "allowSyntheticDefaultImports": true,                /* Allow 'import x from y' when a module doesn't have a default export */
+    "forceConsistentCasingInFileNames": true,            /* Ensure that casing is correct in imports */
+    "isolatedModules": true,                             /* Ensure that each file can be safely transpiled without relying on other imports */
+    
+    /* Type Checking */
+    "strict": true,                                      /* Enable all strict type-checking options */
+    "noUnusedLocals": true,                              /* Enable error reporting when local variables aren't read */
+    "noUnusedParameters": true,                          /* Raise an error when a function parameter isn't read */
+    "noImplicitReturns": true,                           /* Enable error reporting for codepaths that do not explicitly return in a function */
+    "noFallthroughCasesInSwitch": true,                  /* Enable error reporting for fallthrough cases in switch statements */
+    "noUncheckedIndexedAccess": true,                    /* Add 'undefined' to a type when accessed using an index */
+    "noImplicitOverride": true,                          /* Ensure overriding members in derived classes are marked with an override modifier */
+    "allowUnusedLabels": false,                          /* Disable error reporting for unused labels */
+    "allowUnreachableCode": false,                       /* Disable error reporting for unreachable code */
+    
+    /* Completeness */
+    "skipLibCheck": true,                                /* Skip type checking all .d.ts files */
+    
+    /* Bun Specific */
+    "types": ["bun-types"]                               /* Include Bun type definitions */
+  },
+  "include": [
+    "src/**/*"                                           /* Include all files in src directory */
+  ],
+  "exclude": [
+    "node_modules",                                      /* Exclude dependencies */
+    "dist",                                              /* Exclude build output */
+    "**/*.spec.ts",                                      /* Exclude test files */
+    "**/*.test.ts"                                       /* Exclude test files */
+  ]
+}
+EOFTS
+Output
+
+exit code 0
