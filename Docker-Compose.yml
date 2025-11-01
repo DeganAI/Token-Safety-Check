@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - NODE_ENV=production
+      - PAYMENT_ADDRESS=${PAYMENT_ADDRESS}
+      - FACILITATOR_URL=${FACILITATOR_URL:-https://facilitator.daydreams.systems}
+      - NETWORK=${NETWORK:-base}
+      - DEFAULT_PRICE=${DEFAULT_PRICE:-20000}
+      - ETHEREUM_RPC_URL=${ETHEREUM_RPC_URL}
+      - BSC_RPC_URL=${BSC_RPC_URL}
+      - POLYGON_RPC_URL=${POLYGON_RPC_URL}
+      - ARBITRUM_RPC_URL=${ARBITRUM_RPC_URL}
+      - OPTIMISM_RPC_URL=${OPTIMISM_RPC_URL}
+      - BASE_RPC_URL=${BASE_RPC_URL}
+      - AVALANCHE_RPC_URL=${AVALANCHE_RPC_URL}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
