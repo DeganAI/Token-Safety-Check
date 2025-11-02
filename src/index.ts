@@ -124,7 +124,7 @@ const x402Middleware = async (c: any, next: any) => {
       scheme: "exact",
       network: "base",
       maxAmountRequired: DEFAULT_PRICE.toString(),
-      resource: `${SERVICE_URL}${c.req.path}`,
+      resource: `${SERVICE_URL}/api/v1/analyze`,
       description: "Token safety analysis - AI-powered honeypot and scam detection across 7 blockchains",
       mimeType: "application/json",
       payTo: PAYMENT_ADDRESS,
