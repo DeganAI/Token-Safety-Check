@@ -10,9 +10,9 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { z } from "zod";
-import { HoneypotChecker } from "./analyzers/honeypot-checker.js";
-import { OnChainAnalyzer } from "./analyzers/onchain-analyzer.js";
-import { ScoringEngine } from "./analyzers/scoring-engine.js";
+import { HoneypotChecker } from "./analyzers/honeypot-checker";
+import { OnChainAnalyzer } from "./analyzers/onchain-analyzer";
+import { ScoringEngine } from "./analyzers/scoring-engine";
 
 // Environment configuration
 const PORT = process.env.PORT || 3000;
