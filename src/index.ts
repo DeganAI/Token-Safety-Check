@@ -31,7 +31,7 @@ const SERVICE_URL = process.env.SERVICE_URL || process.env.RAILWAY_PUBLIC_DOMAIN
   : `http://localhost:${PORT}`;
 
 // USDC contract address on Base
-const USDC_BASE = "0xe7A413d4192fdee1bB5ecdF9D07A1827Eb15Bc1F";
+const USDC_BASE = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
 
 // RPC URLs configuration
 const RPC_URLS: Record<number, string> = {
@@ -94,7 +94,7 @@ type FieldDef = {
   type?: string;
   required?: boolean | string[];
   description?: string;
-  enum?: number[];
+  enum?: string[];
   properties?: Record<string, FieldDef>;
 };
 
@@ -113,7 +113,7 @@ const TokenCheckSchema = z.object({
 });
 
 // ========================================
-// X402 PAYMENT MIDDLEWARE - SIMPLIFIED
+// X402 PAYMENT MIDDLEWARE - FIXED
 // ========================================
 
 const x402Middleware = async (c: any, next: any) => {
@@ -126,12 +126,11 @@ const x402Middleware = async (c: any, next: any) => {
       network: "base",
       maxAmountRequired: DEFAULT_PRICE.toString(),
       resource: `${SERVICE_URL}/api/v1/analyze`,
-      description: "Token safety analysis - Agent powered honeypot and scam detection across 7 blockchains",
+      description: "Token safety analysis - AI-powered honeypot and scam detection across 7 blockchains",
       mimeType: "application/json",
       payTo: PAYMENT_ADDRESS,
       maxTimeoutSeconds: 300,
-      asset: USDC_BASE,
-      // SIMPLIFIED outputSchema - only input, no output
+      asset: USDC_BASE, // FIXED: This should be USDC address, not payment address
       outputSchema: {
         input: {
           type: "http",
@@ -147,7 +146,7 @@ const x402Middleware = async (c: any, next: any) => {
               type: "number",
               required: true,
               description: "Blockchain network ID",
-              enum: [1, 56, 137, 42161, 10, 8453, 43114],
+              enum: ["1", "56", "137", "42161", "10", "8453", "43114"], // FIXED: enum should be strings
             },
           },
         },
@@ -223,7 +222,7 @@ app.get("/.well-known/agent.json", (c) => {
     id: "token-safety-check",
     name: "Token Safety Check",
     version: "1.0.0",
-    description: "A Daydreams powered token safety analyzer that detects honeypots, scams, and risky tokens across 7 blockchain networks. Analyzes buy/sell taxes, holder concentration, contract verification, and technical risks.",
+    description: "AI-powered token safety analyzer that detects honeypots, scams, and risky tokens across 7 blockchain networks. Analyzes buy/sell taxes, holder concentration, contract verification, and technical risks.",
     
     // X402 Payment Configuration
     payment: {
@@ -272,7 +271,7 @@ app.get("/.well-known/agent.json", (c) => {
               type: "string",
               description: "Token contract address (0x-prefixed hex, 42 characters)",
               pattern: "^0x[a-fA-F0-9]{40}$",
-              example: "0xe7A413d4192fdee1bB5ecdF9D07A1827Eb15Bc1F",
+              example: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
             },
             chain_id: {
               type: "integer",
@@ -303,7 +302,7 @@ app.get("/.well-known/agent.json", (c) => {
           {
             name: "Analyze USDC on Ethereum",
             input: {
-              token_address: "0xe7A413d4192fdee1bB5ecdF9D07A1827Eb15Bc1F",
+              token_address: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
               chain_id: 1,
             },
           },
@@ -572,7 +571,7 @@ app.get("/docs", (c) => {
     examples: {
       curl: `curl -X POST ${SERVICE_URL}/api/v1/analyze \\
   -H "Content-Type: application/json" \\
-  -d '{"token_address":"0xe7A413d4192fdee1bB5ecdF9D07A1827Eb15Bc1F","chain_id":1}'`,
+  -d '{"token_address":"0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48","chain_id":1}'`,
     },
   });
 });
@@ -745,7 +744,7 @@ app.get("/", (c) => {
             <pre><code>curl -X POST ${SERVICE_URL}/api/v1/analyze \\
   -H "Content-Type: application/json" \\
   -d '{
-    "token_address": "0xe7A413d4192fdee1bB5ecdF9D07A1827Eb15Bc1F",
+    "token_address": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
     "chain_id": 1
   }'</code></pre>
         </div>
