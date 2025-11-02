@@ -1,3 +1,4 @@
+/**
  * Token Safety Check - Lucid x402 Agent
  * 
  * A comprehensive token safety analysis service that detects honeypots,
