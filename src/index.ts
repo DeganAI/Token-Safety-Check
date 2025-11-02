@@ -147,7 +147,7 @@ const x402Middleware = async (c: any, next: any) => {
               type: "number",
               required: true,
               description: "Blockchain network ID",
-              enum: ["1", "56", "137", "42161", "10", "8453", "43114"],
+              enum: [1, 56, 137, 42161, 10, 8453, 43114],
             },
           },
         },
