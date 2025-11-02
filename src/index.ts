@@ -113,7 +113,7 @@ const TokenCheckSchema = z.object({
 });
 
 // ========================================
-// X402 PAYMENT MIDDLEWARE - FIXED
+// X402 PAYMENT MIDDLEWARE - CORRECTED
 // ========================================
 
 const x402Middleware = async (c: any, next: any) => {
@@ -130,7 +130,7 @@ const x402Middleware = async (c: any, next: any) => {
       mimeType: "application/json",
       payTo: PAYMENT_ADDRESS,
       maxTimeoutSeconds: 300,
-      asset: USDC_BASE, // FIXED: This should be USDC address, not payment address
+      asset: USDC_BASE,
       outputSchema: {
         input: {
           type: "http",
@@ -146,7 +146,7 @@ const x402Middleware = async (c: any, next: any) => {
               type: "number",
               required: true,
               description: "Blockchain network ID",
-              enum: ["1", "56", "137", "42161", "10", "8453", "43114"], // FIXED: enum should be strings
+              enum: ["1", "56", "137", "42161", "10", "8453", "43114"],
             },
           },
         },
@@ -160,20 +160,15 @@ const x402Middleware = async (c: any, next: any) => {
 
     const x402Response: X402Response = {
       x402Version: 1,
+      error: "Payment required",
       accepts: [accepts],
     };
 
     c.header("X-402", JSON.stringify(x402Response));
     c.header("Content-Type", "application/json");
     
-    return c.json(
-      {
-        error: "Payment required",
-        message: `This endpoint requires ${(DEFAULT_PRICE / 1000000).toFixed(2)} USDC payment via x402`,
-        x402: x402Response,
-      },
-      402
-    );
+    // FIXED: Return the X402Response directly, not nested
+    return c.json(x402Response, 402);
   }
 
   // If payment proof exists, verify it
