@@ -76,14 +76,25 @@ type X402Accept = {
   payTo: string;
   maxTimeoutSeconds: number;
   asset: string;
-  outputSchema?: {
-    input: {
-      type: "http";
-      method: "GET" | "POST";
-      bodyType?: "json" | "form-data" | "multipart-form-data" | "text" | "binary";
-      queryParams?: Record<string, FieldDef>;
-      bodyFields?: Record<string, FieldDef>;
-      headerFields?: Record<string, FieldDef>;
+  outputSchema: {
+  input: {
+    type: "http",
+    method: "POST",
+    bodyType: "json",
+    bodyFields: {
+      token_address: {
+        type: "string",
+        required: true,
+        description: "Token contract address (0x-prefixed hex string, 42 characters)",
+      },
+      chain_id: {
+        type: "number",
+        required: true,
+        description: "Blockchain network ID",
+      },
+    },
+  },
+},
     };
     output?: Record<string, any>;
   };
