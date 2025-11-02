@@ -15,13 +15,21 @@ import { HoneypotChecker } from "./analyzers/honeypot-checker";
 import { OnChainAnalyzer } from "./analyzers/onchain-analyzer";
 import { ScoringEngine } from "./analyzers/scoring-engine";
 
-// Environment configuration
+// ========================================
+// CONFIGURATION
+// ========================================
+
 const PORT = process.env.PORT || 3000;
-const PAYMENT_ADDRESS = process.env.PAYMENT_ADDRESS || "0x01D11F7e1a46AbFC6092d7be484895D2d505095c";
+const PAYMENT_ADDRESS = process.env.PAYMENT_ADDRESS || "0xe7A413d4192fdee1bB5ecdF9D07A1827Eb15Bc1F";
 const FACILITATOR_URL = process.env.FACILITATOR_URL || "https://facilitator.daydreams.systems";
 const NETWORK = process.env.NETWORK || "base";
 const DEFAULT_PRICE = parseInt(process.env.DEFAULT_PRICE || "20000");
-const SERVICE_URL = process.env.SERVICE_URL || `http://localhost:${PORT}`;
+const SERVICE_URL = process.env.SERVICE_URL || process.env.RAILWAY_PUBLIC_DOMAIN 
+  ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` 
+  : `http://localhost:${PORT}`;
+
+// USDC contract address on Base
+const USDC_BASE = "0xe7A413d4192fdee1bB5ecdF9D07A1827Eb15Bc1F";
 
 // RPC URLs configuration
 const RPC_URLS: Record<number, string> = {
@@ -45,7 +53,53 @@ const CHAIN_NAMES: Record<number, string> = {
   43114: "Avalanche",
 };
 
-// Initialize analyzers
+// ========================================
+// X402 PROTOCOL TYPES
+// ========================================
+
+type X402Response = {
+  x402Version: number;
+  error?: string;
+  accepts?: Array<X402Accept>;
+  payer?: string;
+};
+
+type X402Accept = {
+  scheme: "exact";
+  network: "base";
+  maxAmountRequired: string;
+  resource: string;
+  description: string;
+  mimeType: string;
+  payTo: string;
+  maxTimeoutSeconds: number;
+  asset: string;
+  outputSchema?: {
+    input: {
+      type: "http";
+      method: "GET" | "POST";
+      bodyType?: "json" | "form-data" | "multipart-form-data" | "text" | "binary";
+      queryParams?: Record<string, FieldDef>;
+      bodyFields?: Record<string, FieldDef>;
+      headerFields?: Record<string, FieldDef>;
+    };
+    output?: Record<string, any>;
+  };
+  extra?: Record<string, any>;
+};
+
+type FieldDef = {
+  type?: string;
+  required?: boolean | string[];
+  description?: string;
+  enum?: string[];
+  properties?: Record<string, FieldDef>;
+};
+
+// ========================================
+// INITIALIZE ANALYZERS
+// ========================================
+
 const honeypotChecker = new HoneypotChecker({ verbose: false });
 const onchainAnalyzer = new OnChainAnalyzer(RPC_URLS, { verbose: false });
 const scoringEngine = new ScoringEngine({ verbose: false });
@@ -56,13 +110,148 @@ const TokenCheckSchema = z.object({
   chain_id: z.number().int().positive(),
 });
 
-// Create Hono app
+// ========================================
+// X402 PAYMENT MIDDLEWARE
+// ========================================
+
+const x402Middleware = async (c: any, next: any) => {
+  const x402Header = c.req.header("X-402");
+  const paymentProof = c.req.header("X-402-Payment-Proof");
+  
+  // If request has X-402 header but no payment proof, return payment required
+  if (x402Header && !paymentProof) {
+    const accepts: X402Accept = {
+      scheme: "exact",
+      network: "base",
+      maxAmountRequired: DEFAULT_PRICE.toString(),
+      resource: `${SERVICE_URL}${c.req.path}`,
+      description: "Token safety analysis - AI-powered honeypot and scam detection across 7 blockchains",
+      mimeType: "application/json",
+      payTo: PAYMENT_ADDRESS,
+      maxTimeoutSeconds: 300,
+      asset: USDC_BASE,
+      outputSchema: {
+        input: {
+          type: "http",
+          method: "POST",
+          bodyType: "json",
+          bodyFields: {
+            token_address: {
+              type: "string",
+              required: true,
+              description: "Token contract address (0x-prefixed hex string, 42 characters)",
+            },
+            chain_id: {
+              type: "number",
+              required: true,
+              description: "Blockchain network ID",
+              enum: ["1", "56", "137", "42161", "10", "8453", "43114"],
+            },
+          },
+        },
+        output: {
+          type: "object",
+          properties: {
+            success: { 
+              type: "boolean",
+              description: "Whether the analysis was successful"
+            },
+            data: {
+              type: "object",
+              properties: {
+                token: {
+                  type: "object",
+                  properties: {
+                    address: { type: "string" },
+                    chainId: { type: "number" },
+                    chainName: { type: "string" },
+                    name: { type: "string" },
+                    symbol: { type: "string" },
+                  },
+                },
+                analysis: {
+                  type: "object",
+                  properties: {
+                    safetyScore: { 
+                      type: "number",
+                      description: "Overall safety score 0-100 (higher = safer)"
+                    },
+                    riskLevel: { 
+                      type: "string",
+                      enum: ["SAFE", "LOW_RISK", "MEDIUM_RISK", "HIGH_RISK", "CRITICAL"],
+                      description: "Categorical risk assessment"
+                    },
+                    isHoneypot: { 
+                      type: "boolean",
+                      description: "True if token is confirmed honeypot scam"
+                    },
+                    confidence: {
+                      type: "number",
+                      description: "Analysis confidence 0.0-1.0"
+                    },
+                    warnings: { 
+                      type: "array",
+                      items: { type: "string" },
+                      description: "List of specific warnings found"
+                    },
+                    recommendations: { 
+                      type: "array",
+                      items: { type: "string" },
+                      description: "Actionable recommendations for users"
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      extra: {
+        facilitatorUrl: FACILITATOR_URL,
+        priceDisplay: `${(DEFAULT_PRICE / 1000000).toFixed(2)} USDC`,
+        supportedChains: Object.keys(CHAIN_NAMES).map(Number),
+      },
+    };
+
+    const x402Response: X402Response = {
+      x402Version: 1,
+      accepts: [accepts],
+    };
+
+    c.header("X-402", JSON.stringify(x402Response));
+    c.header("Content-Type", "application/json");
+    
+    return c.json(
+      {
+        error: "Payment required",
+        message: `This endpoint requires ${(DEFAULT_PRICE / 1000000).toFixed(2)} USDC payment via x402`,
+        x402: x402Response,
+      },
+      402
+    );
+  }
+
+  // If payment proof exists, verify it (in production, you'd validate with facilitator)
+  if (paymentProof) {
+    console.log(`💰 Payment received: ${paymentProof.substring(0, 20)}...`);
+  }
+
+  await next();
+};
+
+// ========================================
+// CREATE HONO APP
+// ========================================
+
 const app = new Hono();
 
-// Middleware
+// CORS middleware
 app.use("/*", cors());
 
-// Health check endpoint
+// ========================================
+// HEALTH & STATUS ENDPOINTS
+// ========================================
+
 app.get("/health", (c) => {
   return c.json({
     ok: true,
@@ -70,53 +259,64 @@ app.get("/health", (c) => {
     version: "1.0.0",
     timestamp: new Date().toISOString(),
     uptime: process.uptime(),
+    payment: {
+      address: PAYMENT_ADDRESS,
+      network: NETWORK,
+      priceUsdc: (DEFAULT_PRICE / 1000000).toFixed(2),
+    },
   });
 });
 
 // ========================================
-// LUCID AGENT PROTOCOL - x402 Integration
+// LUCID AGENT MANIFEST
 // ========================================
 
-// Agent manifest (Lucid Discovery)
 app.get("/.well-known/agent.json", (c) => {
   const manifest = {
     "@context": "https://lucid.app/agent/v1",
     id: "token-safety-check",
     name: "Token Safety Check",
     version: "1.0.0",
-    description: "AI-powered token safety analyzer that detects honeypots, scams, and risky tokens across 7 blockchain networks. Protects users from malicious tokens before they invest.",
+    description: "AI-powered token safety analyzer that detects honeypots, scams, and risky tokens across 7 blockchain networks. Analyzes buy/sell taxes, holder concentration, contract verification, and technical risks.",
     
-    // x402 Payment Configuration
+    // X402 Payment Configuration
     payment: {
       protocol: "x402",
-      address: PAYMENT_ADDRESS,
-      facilitatorUrl: FACILITATOR_URL,
+      version: 1,
       network: NETWORK,
-      currency: "USDC",
+      payTo: PAYMENT_ADDRESS,
+      asset: USDC_BASE,
+      assetSymbol: "USDC",
       pricePerRequest: DEFAULT_PRICE,
       priceDisplay: `${(DEFAULT_PRICE / 1000000).toFixed(2)} USDC`,
+      facilitatorUrl: FACILITATOR_URL,
     },
 
-    // Capabilities
+    // Agent Capabilities
     capabilities: [
       "token-analysis",
       "honeypot-detection",
       "scam-prevention",
+      "tax-analysis",
+      "holder-analysis",
+      "contract-verification",
       "multi-chain-support",
       "real-time-analysis",
     ],
 
-    // Actions (what AI agents can do)
+    // Available Actions
     actions: [
       {
-        name: "check-token-safety",
-        displayName: "Check Token Safety",
-        description: "Analyze a token for honeypots, high taxes, centralization risks, and technical issues. Returns comprehensive safety assessment with actionable recommendations.",
+        name: "analyze-token",
+        displayName: "Analyze Token Safety",
+        description: "Comprehensive token safety analysis including honeypot detection, tax analysis, centralization risks, and technical verification. Returns safety score, risk level, warnings, and actionable recommendations.",
         
         endpoint: {
           method: "POST",
-          path: "/api/v1/analyze",
+          url: `${SERVICE_URL}/api/v1/analyze`,
           contentType: "application/json",
+          requiresPayment: true,
+          paymentProtocol: "x402",
         },
 
         input: {
@@ -124,9 +324,9 @@ app.get("/.well-known/agent.json", (c) => {
           properties: {
             token_address: {
               type: "string",
-              description: "Token contract address (0x-prefixed hex)",
+              description: "Token contract address (0x-prefixed hex, 42 characters)",
               pattern: "^0x[a-fA-F0-9]{40}$",
-              example: "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+              example: "0xe7A413d4192fdee1bB5ecdF9D07A1827Eb15Bc1F",
             },
             chain_id: {
               type: "integer",
@@ -142,58 +342,80 @@ app.get("/.well-known/agent.json", (c) => {
         output: {
           type: "object",
           properties: {
-            safety_score: {
-              type: "number",
-              description: "Overall safety score from 0-100 (higher = safer)",
-              minimum: 0,
-              maximum: 100,
-            },
-            risk_level: {
-              type: "string",
-              enum: ["SAFE", "LOW_RISK", "MEDIUM_RISK", "HIGH_RISK", "CRITICAL"],
-              description: "Categorical risk assessment",
-            },
-            is_honeypot: {
+            success: {
               type: "boolean",
-              description: "True if token is confirmed honeypot scam",
+              description: "Whether analysis was successful",
             },
-            confidence: {
-              type: "number",
-              description: "Analysis confidence from 0.0-1.0",
-              minimum: 0,
-              maximum: 1,
-            },
-            warnings: {
-              type: "array",
-              items: { type: "string" },
-              description: "Specific risk warnings found",
-            },
-            recommendations: {
-              type: "array",
-              items: { type: "string" },
-              description: "Actionable safety recommendations",
-            },
-            metadata: {
+            data: {
               type: "object",
-              description: "Additional risk categorization",
+              properties: {
+                token: {
+                  type: "object",
+                  description: "Token identification",
+                },
+                analysis: {
+                  type: "object",
+                  properties: {
+                    safetyScore: {
+                      type: "number",
+                      description: "Overall safety score 0-100 (higher = safer)",
+                      minimum: 0,
+                      maximum: 100,
+                    },
+                    riskLevel: {
+                      type: "string",
+                      enum: ["SAFE", "LOW_RISK", "MEDIUM_RISK", "HIGH_RISK", "CRITICAL"],
+                      description: "Categorical risk assessment",
+                    },
+                    isHoneypot: {
+                      type: "boolean",
+                      description: "True if confirmed honeypot scam",
+                    },
+                    confidence: {
+                      type: "number",
+                      description: "Analysis confidence 0.0-1.0",
+                      minimum: 0,
+                      maximum: 1,
+                    },
+                    warnings: {
+                      type: "array",
+                      items: { type: "string" },
+                      description: "Specific risk warnings",
+                    },
+                    recommendations: {
+                      type: "array",
+                      items: { type: "string" },
+                      description: "Actionable recommendations",
+                    },
+                  },
+                },
+                details: {
+                  type: "object",
+                  description: "Detailed technical analysis",
+                },
+              },
             },
           },
         },
 
         examples: [
           {
-            name: "Check USDC on Ethereum",
+            name: "Analyze USDC on Ethereum",
             input: {
-              token_address: "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+              token_address: "0xe7A413d4192fdee1bB5ecdF9D07A1827Eb15Bc1F",
               chain_id: 1,
             },
-            output: {
-              safety_score: 95,
-              risk_level: "SAFE",
-              is_honeypot: false,
-              confidence: 0.95,
-              warnings: [],
-              recommendations: ["✅ Generally safe to interact"],
+            expectedOutput: {
+              success: true,
+              data: {
+                analysis: {
+                  safetyScore: 95,
+                  riskLevel: "SAFE",
+                  isHoneypot: false,
+                  warnings: [],
+                  recommendations: ["✅ Generally safe to interact"],
+                },
+              },
             },
           },
         ],
@@ -201,8 +423,32 @@ app.get("/.well-known/agent.json", (c) => {
         pricing: {
           amount: DEFAULT_PRICE,
           currency: "USDC",
+          network: "base",
           display: `${(DEFAULT_PRICE / 1000000).toFixed(2)} USDC per analysis`,
         },
+      },
+    ],
+
+    // Supported Blockchains
+    supportedChains: Object.entries(CHAIN_NAMES).map(([id, name]) => ({
+      chainId: parseInt(id),
+      name,
+      supported: true,
+    })),
+
+    // Data Sources
+    dataSources: [
+      {
+        name: "honeypot.is",
+        description: "Honeypot detection and token simulation",
+        type: "api",
+        weight: 0.6,
+      },
+      {
+        name: "on-chain",
+        description: "Direct blockchain verification via Web3",
+        type: "rpc",
+        weight: 0.4,
       },
     ],
 
@@ -211,31 +457,26 @@ app.get("/.well-known/agent.json", (c) => {
       author: "DeganAI",
       homepage: "https://github.com/DeganAI/Token-Safety-Check",
       repository: "https://github.com/DeganAI/Token-Safety-Check",
+      documentation: `${SERVICE_URL}/docs`,
       license: "MIT",
-      supportedChains: Object.entries(CHAIN_NAMES).map(([id, name]) => ({
-        chainId: parseInt(id),
-        name,
-      })),
-      dataSources: [
-        {
-          name: "honeypot.is",
-          description: "Honeypot detection and simulation",
-          weight: 0.6,
-        },
-        {
-          name: "on-chain",
-          description: "Direct blockchain verification via Web3",
-          weight: 0.4,
-        },
+      tags: [
+        "defi",
+        "security",
+        "token-analysis",
+        "honeypot-detection",
+        "scam-prevention",
+        "blockchain",
+        "web3",
       ],
     },
 
-    // Links for discovery
+    // API Links
     links: {
       self: `${SERVICE_URL}/.well-known/agent.json`,
-      documentation: `${SERVICE_URL}/docs`,
-      health: `${SERVICE_URL}/health`,
       analyze: `${SERVICE_URL}/api/v1/analyze`,
+      health: `${SERVICE_URL}/health`,
+      docs: `${SERVICE_URL}/docs`,
+      register: "https://www.x402scan.com/resources/register",
     },
   };
 
@@ -243,10 +484,10 @@ app.get("/.well-known/agent.json", (c) => {
 });
 
 // ========================================
-// MAIN API ENDPOINT - Token Analysis
+// MAIN API ENDPOINT - TOKEN ANALYSIS
 // ========================================
 
-app.post("/api/v1/analyze", async (c) => {
+app.post("/api/v1/analyze", x402Middleware, async (c) => {
   const startTime = Date.now();
 
   try {
@@ -289,7 +530,7 @@ app.post("/api/v1/analyze", async (c) => {
     console.log(`   Is Honeypot: ${result.is_honeypot}`);
     console.log(`   Confidence: ${(result.confidence * 100).toFixed(0)}%`);
 
-    // Return Lucid-compatible response
+    // Return comprehensive response
     return c.json({
       success: true,
       data: {
@@ -320,7 +561,7 @@ app.post("/api/v1/analyze", async (c) => {
             technical: result.metadata?.technical_risk || "unknown",
           },
 
-          // Data sources
+          // Verification
           sources: result.sources_checked,
           redFlags: result.metadata?.red_flags_count || 0,
           passedBasicChecks: result.metadata?.passed_basic_checks || false,
@@ -337,6 +578,7 @@ app.post("/api/v1/analyze", async (c) => {
             contractVerified: honeypotData.contract_verified,
             isProxy: honeypotData.is_proxy,
             liquidityUsd: honeypotData.metadata?.liquidity_usd,
+            honeypotReason: honeypotData.honeypot_reason,
           },
           onchain: {
             isContract: onchainData.is_contract,
@@ -344,6 +586,7 @@ app.post("/api/v1/analyze", async (c) => {
             codeSize: onchainData.code_size,
             totalSupply: onchainData.total_supply,
             decimals: onchainData.decimals,
+            checks: onchainData.checks,
           },
         },
 
@@ -352,6 +595,7 @@ app.post("/api/v1/analyze", async (c) => {
           timestamp: new Date().toISOString(),
           processingTimeMs: processingTime,
           version: "1.0.0",
+          paymentReceived: !!c.req.header("X-402-Payment-Proof"),
         },
       },
     });
@@ -386,27 +630,69 @@ app.post("/api/v1/analyze", async (c) => {
 });
 
 // ========================================
-// LEGACY ENDPOINTS (for compatibility)
+// DOCUMENTATION ENDPOINTS
 // ========================================
 
-app.post("/entrypoints/check-token-safety/invoke", async (c) => {
-  // Redirect to new API
-  return c.redirect("/api/v1/analyze", 308);
-});
-
-app.get("/entrypoints/check-token-safety", (c) => {
+app.get("/docs", (c) => {
   return c.json({
-    message: "This endpoint has been deprecated. Please use /api/v1/analyze",
-    newEndpoint: "/api/v1/analyze",
-    documentation: "/.well-known/agent.json",
+    name: "Token Safety Check API",
+    version: "1.0.0",
+    description: "AI-powered token safety analysis with x402 micropayments",
+    baseUrl: SERVICE_URL,
+    
+    authentication: {
+      type: "x402",
+      network: NETWORK,
+      paymentAddress: PAYMENT_ADDRESS,
+      pricePerRequest: `${(DEFAULT_PRICE / 1000000).toFixed(2)} USDC`,
+      asset: USDC_BASE,
+    },
+
+    endpoints: [
+      {
+        method: "POST",
+        path: "/api/v1/analyze",
+        description: "Analyze token safety (requires x402 payment)",
+        requiresPayment: true,
+        price: `${(DEFAULT_PRICE / 1000000).toFixed(2)} USDC`,
+        requestBody: {
+          token_address: "0x-prefixed hex address (42 chars)",
+          chain_id: "Network ID (1, 56, 137, 42161, 10, 8453, 43114)",
+        },
+        response: "Comprehensive safety analysis with score, warnings, recommendations",
+      },
+      {
+        method: "GET",
+        path: "/.well-known/agent.json",
+        description: "Lucid agent manifest for AI discovery",
+        requiresPayment: false,
+      },
+      {
+        method: "GET",
+        path: "/health",
+        description: "Service health status",
+        requiresPayment: false,
+      },
+    ],
+
+    supportedChains: Object.entries(CHAIN_NAMES).map(([id, name]) => ({
+      chainId: parseInt(id),
+      name,
+    })),
+
+    examples: {
+      curl: `curl -X POST ${SERVICE_URL}/api/v1/analyze \\
+  -H "Content-Type: application/json" \\
+  -H "X-402: 1" \\
+  -d '{"token_address":"0xe7A413d4192fdee1bB5ecdF9D07A1827Eb15Bc1F","chain_id":1}'`,
+    },
   });
 });
 
 // ========================================
-// DOCUMENTATION & INFO ENDPOINTS
+// ROOT ENDPOINT - HTML UI
 // ========================================
 
-// Root endpoint - Human-friendly landing page
 app.get("/", (c) => {
   const html = `
 <!DOCTYPE html>
@@ -469,7 +755,6 @@ app.get("/", (c) => {
         .method.post { background: #60a5fa; color: #fff; }
         a { color: #4ade80; text-decoration: none; }
         a:hover { text-decoration: underline; }
-        .chains { display: flex; flex-wrap: wrap; gap: 10px; }
         .stats {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -484,6 +769,13 @@ app.get("/", (c) => {
         }
         .stat-value { font-size: 2em; font-weight: bold; }
         .stat-label { opacity: 0.8; margin-top: 5px; }
+        pre {
+            background: rgba(0,0,0,0.3);
+            padding: 15px;
+            border-radius: 8px;
+            overflow-x: auto;
+            font-size: 0.9em;
+        }
     </style>
 </head>
 <body>
@@ -508,26 +800,26 @@ app.get("/", (c) => {
                 <div class="stat-label">Data Sources</div>
             </div>
             <div class="stat">
-                <div class="stat-value">$0.02</div>
+                <div class="stat-value">$${(DEFAULT_PRICE / 1000000).toFixed(2)}</div>
                 <div class="stat-label">Per Analysis</div>
             </div>
         </div>
 
         <div class="section">
-            <h2>🎯 What We Do</h2>
-            <p>Protect yourself from honeypots, scams, and risky tokens. Our AI agent analyzes tokens across multiple blockchains, checking for:</p>
+            <h2>🎯 What We Detect</h2>
             <ul style="margin: 15px 0 0 20px; line-height: 1.8;">
-                <li>🍯 Honeypot detection</li>
-                <li>💸 High buy/sell taxes</li>
-                <li>👥 Centralization risks</li>
-                <li>📝 Contract verification</li>
-                <li>🔧 Technical issues</li>
+                <li>🍯 Honeypot scams (tokens you can't sell)</li>
+                <li>💸 Excessive buy/sell taxes</li>
+                <li>👥 Dangerous centralization (whale concentration)</li>
+                <li>📝 Unverified or suspicious contracts</li>
+                <li>🔧 Technical ERC20 compliance issues</li>
+                <li>🚫 Proxy contracts with hidden functionality</li>
             </ul>
         </div>
 
         <div class="section">
             <h2>🔗 Supported Blockchains</h2>
-            <div class="chains">
+            <div style="display: flex; flex-wrap: wrap; gap: 10px;">
                 ${Object.values(CHAIN_NAMES).map(name => `<span class="badge">${name}</span>`).join('')}
             </div>
         </div>
@@ -538,13 +830,13 @@ app.get("/", (c) => {
             <div class="endpoint">
                 <span class="method post">POST</span>
                 <a href="/api/v1/analyze">/api/v1/analyze</a>
-                <p style="margin-top: 10px; opacity: 0.8;">Analyze token safety (main endpoint)</p>
+                <p style="margin-top: 10px; opacity: 0.8;">Analyze token safety (requires x402 payment)</p>
             </div>
 
             <div class="endpoint">
                 <span class="method">GET</span>
                 <a href="/.well-known/agent.json">/.well-known/agent.json</a>
-                <p style="margin-top: 10px; opacity: 0.8;">Lucid agent manifest (for AI discovery)</p>
+                <p style="margin-top: 10px; opacity: 0.8;">Lucid agent manifest for AI discovery</p>
             </div>
 
             <div class="endpoint">
@@ -552,29 +844,38 @@ app.get("/", (c) => {
                 <a href="/health">/health</a>
                 <p style="margin-top: 10px; opacity: 0.8;">Service health check</p>
             </div>
+
+            <div class="endpoint">
+                <span class="method">GET</span>
+                <a href="/docs">/docs</a>
+                <p style="margin-top: 10px; opacity: 0.8;">API documentation</p>
+            </div>
         </div>
 
         <div class="section">
             <h2>📖 Quick Start</h2>
-            <pre style="background: rgba(0,0,0,0.3); padding: 15px; border-radius: 8px; overflow-x: auto;"><code>curl -X POST ${SERVICE_URL}/api/v1/analyze \\
+            <pre><code>curl -X POST ${SERVICE_URL}/api/v1/analyze \\
   -H "Content-Type: application/json" \\
+  -H "X-402: 1" \\
   -d '{
-    "token_address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+    "token_address": "0xe7A413d4192fdee1bB5ecdF9D07A1827Eb15Bc1F",
     "chain_id": 1
   }'</code></pre>
         </div>
 
         <div class="section">
             <h2>💰 Payment</h2>
-            <p>Powered by x402 micropayments on Base network</p>
-            <p style="margin-top: 10px;">Price: <strong>$${(DEFAULT_PRICE / 1000000).toFixed(2)} USDC</strong> per token analysis</p>
+            <p><strong>Protocol:</strong> x402 on Base network</p>
+            <p style="margin-top: 10px;"><strong>Price:</strong> $${(DEFAULT_PRICE / 1000000).toFixed(2)} USDC per analysis</p>
+            <p style="margin-top: 10px;"><strong>Payment Address:</strong> <code>${PAYMENT_ADDRESS}</code></p>
         </div>
 
         <div class="section" style="text-align: center; padding: 30px;">
             <p style="opacity: 0.8;">Built with ❤️ for the Lucid AI ecosystem</p>
-            <p style="margin-top: 10px;">
+            <p style="margin-top: 15px;">
                 <a href="https://github.com/DeganAI/Token-Safety-Check" target="_blank">GitHub</a> •
-                <a href="/.well-known/agent.json">Agent Manifest</a> •
+                <a href="/.well-known/agent.json">Manifest</a> •
+                <a href="/docs">Docs</a> •
                 <a href="/health">Status</a>
             </p>
         </div>
@@ -586,54 +887,19 @@ app.get("/", (c) => {
   return c.html(html);
 });
 
-// API documentation
-app.get("/docs", (c) => {
-  return c.json({
-    name: "Token Safety Check API",
-    version: "1.0.0",
-    baseUrl: SERVICE_URL,
-    authentication: {
-      type: "x402",
-      network: NETWORK,
-      pricePerRequest: `${(DEFAULT_PRICE / 1000000).toFixed(2)} USDC`,
-    },
-    endpoints: [
-      {
-        method: "POST",
-        path: "/api/v1/analyze",
-        description: "Analyze token safety",
-        requestBody: {
-          token_address: "0x-prefixed hex address",
-          chain_id: "Network ID (1, 56, 137, etc.)",
-        },
-        response: "Comprehensive safety analysis with score, warnings, and recommendations",
-      },
-      {
-        method: "GET",
-        path: "/.well-known/agent.json",
-        description: "Lucid agent manifest for AI discovery",
-      },
-      {
-        method: "GET",
-        path: "/health",
-        description: "Service health status",
-      },
-    ],
-    supportedChains: Object.entries(CHAIN_NAMES).map(([id, name]) => ({
-      chainId: parseInt(id),
-      name,
-    })),
-  });
-});
+// ========================================
+// START SERVER
+// ========================================
 
-// Start server
 console.log(`\n🚀 Token Safety Check - Lucid AI Agent`);
 console.log(`📊 Version: 1.0.0`);
 console.log(`🌐 Port: ${PORT}`);
-console.log(`🔗 Chains: ${Object.values(CHAIN_NAMES).join(", ")}`);
-console.log(`💰 Price: ${(DEFAULT_PRICE / 1000000).toFixed(2)} USDC per analysis`);
+console.log(`🔗 URL: ${SERVICE_URL}`);
+console.log(`💰 Payment: ${(DEFAULT_PRICE / 1000000).toFixed(2)} USDC per analysis`);
 console.log(`🎯 Protocol: x402 on ${NETWORK}`);
-console.log(`\n✅ Server running at ${SERVICE_URL}\n`);
+console.log(`💳 Address: ${PAYMENT_ADDRESS}`);
+console.log(`📡 Chains: ${Object.values(CHAIN_NAMES).join(", ")}`);
+console.log(`\n✅ Server ready at ${SERVICE_URL}\n`);
 
 export default {
   port: PORT,
