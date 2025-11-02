@@ -126,7 +126,7 @@ const x402Middleware = async (c: any, next: any) => {
       network: "base",
       maxAmountRequired: DEFAULT_PRICE.toString(),
       resource: `${SERVICE_URL}/api/v1/analyze`,
-      description: "Token safety analysis - AI-powered honeypot and scam detection across 7 blockchains",
+      description: "Token safety analysis - Agent powered honeypot and scam detection across 7 blockchains",
       mimeType: "application/json",
       payTo: PAYMENT_ADDRESS,
       maxTimeoutSeconds: 300,
@@ -223,7 +223,7 @@ app.get("/.well-known/agent.json", (c) => {
     id: "token-safety-check",
     name: "Token Safety Check",
     version: "1.0.0",
-    description: "AI-powered token safety analyzer that detects honeypots, scams, and risky tokens across 7 blockchain networks. Analyzes buy/sell taxes, holder concentration, contract verification, and technical risks.",
+    description: "A Daydreams powered token safety analyzer that detects honeypots, scams, and risky tokens across 7 blockchain networks. Analyzes buy/sell taxes, holder concentration, contract verification, and technical risks.",
     
     // X402 Payment Configuration
     payment: {
