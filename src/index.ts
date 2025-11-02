@@ -6,6 +6,8 @@
  * 
  * Powered by x402 micropayments on Base network.
  * Built for AI agents using the Lucid protocol.
+ * 
+ * FIXED: Proper x402 implementation for x402scan registration
  */
 
 import { Hono } from "hono";
@@ -28,8 +30,8 @@ const SERVICE_URL = process.env.SERVICE_URL || process.env.RAILWAY_PUBLIC_DOMAIN
   ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` 
   : `http://localhost:${PORT}`;
 
-// USDC contract address on Base
-const USDC_BASE = "0xe7A413d4192fdee1bB5ecdF9D07A1827Eb15Bc1F";
+// USDC contract address on Base (FIXED)
+const USDC_BASE = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
 
 // RPC URLs configuration
 const RPC_URLS: Record<number, string> = {
@@ -111,19 +113,19 @@ const TokenCheckSchema = z.object({
 });
 
 // ========================================
-// X402 PAYMENT MIDDLEWARE
+// X402 PAYMENT MIDDLEWARE (FIXED)
 // ========================================
 
 const x402Middleware = async (c: any, next: any) => {
-  const x402Header = c.req.header("X-402");
   const paymentProof = c.req.header("X-402-Payment-Proof");
   
-  // If request has X-402 header but no payment proof, return payment required
-  if (x402Header && !paymentProof) {
+  // FIXED: Always return 402 if no payment proof (removed X-402 header check)
+  if (!paymentProof) {
     const accepts: X402Accept = {
       scheme: "exact",
       network: "base",
       maxAmountRequired: DEFAULT_PRICE.toString(),
+      // FIXED: Use full URL instead of dynamic path
       resource: `${SERVICE_URL}/api/v1/analyze`,
       description: "Token safety analysis - AI-powered honeypot and scam detection across 7 blockchains",
       mimeType: "application/json",
@@ -326,7 +328,7 @@ app.get("/.well-known/agent.json", (c) => {
               type: "string",
               description: "Token contract address (0x-prefixed hex, 42 characters)",
               pattern: "^0x[a-fA-F0-9]{40}$",
-              example: "0xe7A413d4192fdee1bB5ecdF9D07A1827Eb15Bc1F",
+              example: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
             },
             chain_id: {
               type: "integer",
@@ -402,7 +404,7 @@ app.get("/.well-known/agent.json", (c) => {
           {
             name: "Analyze USDC on Ethereum",
             input: {
-              token_address: "0xe7A413d4192fdee1bB5ecdF9D07A1827Eb15Bc1F",
+              token_address: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
               chain_id: 1,
             },
             expectedOutput: {
@@ -684,7 +686,7 @@ app.get("/docs", (c) => {
       curl: `curl -X POST ${SERVICE_URL}/api/v1/analyze \\
   -H "Content-Type: application/json" \\
   -H "X-402: 1" \\
-  -d '{"token_address":"0xe7A413d4192fdee1bB5ecdF9D07A1827Eb15Bc1F","chain_id":1}'`,
+  -d '{"token_address":"0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48","chain_id":1}'`,
     },
   });
 });
@@ -858,7 +860,7 @@ app.get("/", (c) => {
   -H "Content-Type: application/json" \\
   -H "X-402: 1" \\
   -d '{
-    "token_address": "0xe7A413d4192fdee1bB5ecdF9D07A1827Eb15Bc1F",
+    "token_address": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
     "chain_id": 1
   }'</code></pre>
         </div>
