@@ -1,17 +1,39 @@
 /**
- * Token Safety Check - Daydreams x402 Agent
+ * Token Safety Check - x402 Agent
  * 
- * Comprehensive token safety analysis to prevent honeypots and scams
+ * A comprehensive token safety analysis service that detects honeypots,
+ * scams, and risky tokens across multiple blockchain networks.
+ * 
+ * Powered by x402 micropayments on Base network.
  */
+
+import { Hono } from "hono";
+import { cors } from "hono/cors";
 import { z } from "zod";
-import { createAgentApp } from "@lucid-dreams/agent-kit";
-import type { EntrypointDef } from "@lucid-dreams/agent-kit/types";
 import { HoneypotChecker } from "./analyzers/honeypot-checker.js";
 import { OnChainAnalyzer } from "./analyzers/onchain-analyzer.js";
 import { ScoringEngine } from "./analyzers/scoring-engine.js";
 
-// Supported blockchain chains
-const SUPPORTED_CHAINS = {
+// Environment configuration
+const PORT = process.env.PORT || 3000;
+const PAYMENT_ADDRESS = process.env.PAYMENT_ADDRESS || "0x01D11F7e1a46AbFC6092d7be484895D2d505095c";
+const FACILITATOR_URL = process.env.FACILITATOR_URL || "https://facilitator.daydreams.systems";
+const NETWORK = process.env.NETWORK || "base";
+const DEFAULT_PRICE = parseInt(process.env.DEFAULT_PRICE || "20000");
+
+// RPC URLs configuration
+const RPC_URLS: Record<number, string> = {
+  1: process.env.ETHEREUM_RPC_URL || "https://eth.llamarpc.com",
+  56: process.env.BSC_RPC_URL || "https://bsc-dataseed1.binance.org",
+  137: process.env.POLYGON_RPC_URL || "https://polygon-rpc.com",
+  42161: process.env.ARBITRUM_RPC_URL || "https://arb1.arbitrum.io/rpc",
+  10: process.env.OPTIMISM_RPC_URL || "https://mainnet.optimism.io",
+  8453: process.env.BASE_RPC_URL || "https://mainnet.base.org",
+  43114: process.env.AVALANCHE_RPC_URL || "https://api.avax.network/ext/bc/C/rpc",
+};
+
+// Chain ID to name mapping
+const CHAIN_NAMES: Record<number, string> = {
   1: "Ethereum",
   56: "BSC",
   137: "Polygon",
@@ -19,190 +41,253 @@ const SUPPORTED_CHAINS = {
   10: "Optimism",
   8453: "Base",
   43114: "Avalanche",
-} as const;
-
-// Initialize analyzers
-const honeypotChecker = new HoneypotChecker();
-const scoringEngine = new ScoringEngine();
-
-// Initialize on-chain analyzer with RPC URLs from environment
-const rpcUrls: Record<number, string> = {};
-const RPC_ENV_MAP: Record<number, string> = {
-  1: "ETHEREUM_RPC_URL",
-  56: "BSC_RPC_URL",
-  137: "POLYGON_RPC_URL",
-  42161: "ARBITRUM_RPC_URL",
-  10: "OPTIMISM_RPC_URL",
-  8453: "BASE_RPC_URL",
-  43114: "AVALANCHE_RPC_URL",
 };
 
-for (const [chainId, envVar] of Object.entries(RPC_ENV_MAP)) {
-  const rpcUrl = process.env[envVar];
-  if (rpcUrl) {
-    rpcUrls[Number(chainId)] = rpcUrl;
-  }
-}
+// Initialize analyzers
+const honeypotChecker = new HoneypotChecker({ verbose: false });
+const onchainAnalyzer = new OnChainAnalyzer(RPC_URLS, { verbose: false });
+const scoringEngine = new ScoringEngine({ verbose: false });
 
-const onchainAnalyzer = new OnChainAnalyzer(rpcUrls);
-console.log(`✓ On-chain analyzer initialized with ${Object.keys(rpcUrls).length} chains`);
-
-// Input/Output schemas
-const SafetyCheckInput = z.object({
-  token_address: z.string().describe("Token contract address to analyze"),
-  chain_id: z.number().int().positive().describe("Blockchain ID (1=Ethereum, 56=BSC, 137=Polygon, etc.)"),
+// Input validation schema
+const TokenCheckSchema = z.object({
+  token_address: z.string().regex(/^0x[a-fA-F0-9]{40}$/, "Invalid Ethereum address"),
+  chain_id: z.number().int().positive(),
 });
 
-const SafetyCheckOutput = z.object({
-  token_address: z.string(),
-  chain_id: z.number(),
-  safety_score: z.number().int().min(0).max(100).describe("Overall safety score (0-100, higher=safer)"),
-  risk_level: z.enum(["SAFE", "LOW_RISK", "MEDIUM_RISK", "HIGH_RISK", "CRITICAL"]),
-  is_honeypot: z.boolean(),
-  confidence: z.number().min(0).max(1).describe("Analysis confidence (0.0-1.0)"),
-  warnings: z.array(z.string()),
-  recommendations: z.array(z.string()),
-  details: z.object({
-    honeypot: z.record(z.any()),
-    onchain: z.record(z.any()),
-  }),
-  sources_checked: z.array(z.string()),
-  timestamp: z.string(),
-});
+// Create Hono app
+const app = new Hono();
 
-// Create agent app
-const { app, addEntrypoint } = createAgentApp(
-  {
-    name: "Token Safety Check",
+// Middleware
+app.use("/*", cors());
+
+// Health check endpoint
+app.get("/health", (c) => {
+  return c.json({
+    ok: true,
     version: "1.0.0",
-    description: "Comprehensive token safety analysis to prevent honeypots and scams. Checks multiple sources including honeypot detection, contract verification, and on-chain analysis.",
-  },
-  {
-    // Enable x402 payments with default price
-    useConfigPayments: true,
-    config: {
-      payments: {
-        defaultPrice: "20000", // 0.02 USDC (6 decimals)
-        network: "base",
-        payTo: process.env.PAYMENT_ADDRESS || "0x01D11F7e1a46AbFC6092d7be484895D2d505095c",
+    timestamp: new Date().toISOString(),
+  });
+});
+
+// x402 Agent Discovery - Well-known endpoint
+app.get("/.well-known/agent.json", (c) => {
+  const manifest = {
+    name: "Token Safety Check",
+    description: "Comprehensive token safety analysis to prevent honeypots and scams across multiple chains",
+    version: "1.0.0",
+    x402: {
+      payment: {
+        address: PAYMENT_ADDRESS,
+        facilitatorUrl: FACILITATOR_URL,
+        network: NETWORK,
       },
+      entrypoints: [
+        {
+          name: "check-token-safety",
+          displayName: "Check Token Safety",
+          description: "Analyze a token for honeypots, high taxes, and other scam indicators",
+          path: "/entrypoints/check-token-safety",
+          method: "POST",
+          price: DEFAULT_PRICE,
+          input: {
+            type: "object",
+            properties: {
+              token_address: {
+                type: "string",
+                description: "Token contract address (0x...)",
+                pattern: "^0x[a-fA-F0-9]{40}$",
+              },
+              chain_id: {
+                type: "number",
+                description: "Blockchain network ID (1=Ethereum, 56=BSC, 137=Polygon, etc.)",
+                enum: [1, 56, 137, 42161, 10, 8453, 43114],
+              },
+            },
+            required: ["token_address", "chain_id"],
+          },
+          output: {
+            type: "object",
+            properties: {
+              safety_score: {
+                type: "number",
+                description: "Overall safety score 0-100 (higher = safer)",
+              },
+              risk_level: {
+                type: "string",
+                enum: ["SAFE", "LOW_RISK", "MEDIUM_RISK", "HIGH_RISK", "CRITICAL"],
+              },
+              is_honeypot: {
+                type: "boolean",
+                description: "Whether token is confirmed honeypot",
+              },
+              warnings: {
+                type: "array",
+                items: { type: "string" },
+              },
+              recommendations: {
+                type: "array",
+                items: { type: "string" },
+              },
+            },
+          },
+        },
+      ],
+      categories: ["blockchain", "security", "defi"],
+      tags: ["token-analysis", "honeypot-detection", "scam-prevention", "blockchain-security"],
     },
-    // Add AP2 extension for Agent Payments Protocol
-    ap2: {
-      roles: ["merchant"],
-      required: true,
+    author: {
+      name: "Token Safety Check Team",
+      url: "https://github.com/yourusername/token-safety-check",
     },
-  }
-);
+    homepage: "https://github.com/yourusername/token-safety-check",
+    repository: "https://github.com/yourusername/token-safety-check",
+  };
 
-// Define the main entrypoint
-const tokenSafetyEntrypoint: EntrypointDef = {
-  key: "check-token-safety",
-  description: "Analyze token safety to detect honeypots, scams, and risks across multiple data sources",
-  input: SafetyCheckInput,
-  output: SafetyCheckOutput,
-  streaming: false,
-  price: "20000", // 0.02 USDC per check
-  
-  async handler({ input }) {
-    const { token_address, chain_id } = input;
+  return c.json(manifest);
+});
 
-    // Validate chain support
-    if (!(chain_id in SUPPORTED_CHAINS)) {
-      throw new Error(
-        `Chain ${chain_id} not supported. Supported chains: ${Object.keys(SUPPORTED_CHAINS).join(", ")}`
+// Main entrypoint - Token safety check
+app.post("/entrypoints/check-token-safety/invoke", async (c) => {
+  try {
+    // Parse and validate input
+    const body = await c.req.json();
+    const input = TokenCheckSchema.parse(body);
+
+    console.log(`\n🔍 Analyzing token ${input.token_address} on chain ${input.chain_id}...`);
+
+    // Check if chain is supported
+    if (!onchainAnalyzer.isChainSupported(input.chain_id)) {
+      return c.json(
+        {
+          error: "Unsupported chain",
+          message: `Chain ID ${input.chain_id} is not supported. Supported chains: ${onchainAnalyzer.getSupportedChains().join(", ")}`,
+        },
+        400
       );
     }
 
-    console.log(`Analyzing token ${token_address} on chain ${chain_id} (${SUPPORTED_CHAINS[chain_id as keyof typeof SUPPORTED_CHAINS]})`);
-
-    // Run analyzers in parallel
+    // Run both analyzers in parallel
     const [honeypotData, onchainData] = await Promise.all([
-      honeypotChecker.checkToken(token_address, chain_id),
-      onchainAnalyzer.analyzeToken(token_address, chain_id),
+      honeypotChecker.checkToken(input.token_address, input.chain_id),
+      onchainAnalyzer.analyzeToken(input.token_address, input.chain_id),
     ]);
 
     // Aggregate results
     const result = scoringEngine.aggregateResults(honeypotData, onchainData);
 
-    // Build output
-    const output = {
-      token_address,
-      chain_id,
-      safety_score: result.safety_score,
-      risk_level: result.risk_level,
-      is_honeypot: result.is_honeypot,
-      confidence: result.confidence,
-      warnings: result.warnings,
-      recommendations: result.recommendations,
-      details: result.raw_data,
-      sources_checked: result.sources_checked,
-      timestamp: new Date().toISOString(),
-    };
+    // Log summary
+    console.log(`✅ Analysis complete:`);
+    console.log(`   Safety Score: ${result.safety_score}/100`);
+    console.log(`   Risk Level: ${result.risk_level}`);
+    console.log(`   Is Honeypot: ${result.is_honeypot}`);
+    console.log(`   Warnings: ${result.warnings.length}`);
+    console.log(`   Confidence: ${(result.confidence * 100).toFixed(0)}%`);
 
-    console.log(`✓ Analysis complete: ${result.risk_level} (score: ${result.safety_score})`);
-
-    return {
-      output,
-      usage: {
-        total_tokens: 1, // Simple usage tracking
+    // Return comprehensive result
+    return c.json({
+      success: true,
+      data: {
+        token_address: input.token_address,
+        chain_id: input.chain_id,
+        chain_name: CHAIN_NAMES[input.chain_id] || "Unknown",
+        analysis: {
+          safety_score: result.safety_score,
+          risk_level: result.risk_level,
+          is_honeypot: result.is_honeypot,
+          confidence: result.confidence,
+          warnings: result.warnings,
+          recommendations: result.recommendations,
+          metadata: result.metadata,
+          sources_checked: result.sources_checked,
+        },
+        timestamp: new Date().toISOString(),
       },
-    };
-  },
-};
+    });
+  } catch (error: any) {
+    console.error("❌ Error processing request:", error);
 
-// Register entrypoint
-addEntrypoint(tokenSafetyEntrypoint);
+    if (error instanceof z.ZodError) {
+      return c.json(
+        {
+          error: "Validation error",
+          message: "Invalid input parameters",
+          details: error.errors,
+        },
+        400
+      );
+    }
 
-// Add custom route for legacy API compatibility (optional)
-app.get("/", (c) => {
+    return c.json(
+      {
+        error: "Internal server error",
+        message: error.message || "An unexpected error occurred",
+      },
+      500
+    );
+  }
+});
+
+// Entrypoint discovery (returns schema)
+app.get("/entrypoints/check-token-safety", (c) => {
   return c.json({
-    service: "Token Safety Check",
-    description: "Comprehensive token safety analysis to prevent honeypots and scams",
-    version: "1.0.0",
-    endpoints: {
-      analyze: "/entrypoints/check-token-safety/invoke",
-      health: "/health",
-      manifest: "/.well-known/agent.json",
+    name: "check-token-safety",
+    displayName: "Check Token Safety",
+    description: "Analyze a token for honeypots, high taxes, and other scam indicators",
+    method: "POST",
+    path: "/entrypoints/check-token-safety/invoke",
+    price: DEFAULT_PRICE,
+    input_schema: {
+      type: "object",
+      properties: {
+        token_address: {
+          type: "string",
+          description: "Token contract address (0x...)",
+          pattern: "^0x[a-fA-F0-9]{40}$",
+        },
+        chain_id: {
+          type: "number",
+          description: "Blockchain network ID",
+          enum: [1, 56, 137, 42161, 10, 8453, 43114],
+        },
+      },
+      required: ["token_address", "chain_id"],
     },
-    features: [
-      "Honeypot detection",
-      "Contract verification check",
-      "Tax analysis (buy/sell/transfer)",
-      "Holder concentration analysis",
-      "On-chain validation",
-      "Multi-source aggregation",
-      "Confidence scoring",
-    ],
-    supported_chains: Object.entries(SUPPORTED_CHAINS).map(([id, name]) => ({
-      chain_id: Number(id),
-      name,
-    })),
-    payment: {
-      protocol: "x402",
-      network: "base",
-      price: "0.02 USDC per check",
+    example_input: {
+      token_address: "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+      chain_id: 1,
     },
   });
 });
 
-// Export for deployment
-export default app;
-
-// Start server if run directly
-if (import.meta.main) {
-  const port = Number(process.env.PORT || 3000);
-  
-  console.log(`\n🚀 Token Safety Check starting on port ${port}...`);
-  console.log(`📊 Supported chains: ${Object.values(SUPPORTED_CHAINS).join(", ")}`);
-  console.log(`💰 Payment: 0.02 USDC via x402 on Base\n`);
-  
-  Bun.serve({
-    port,
-    fetch: app.fetch,
+// Root endpoint
+app.get("/", (c) => {
+  return c.json({
+    service: "Token Safety Check",
+    version: "1.0.0",
+    description: "Comprehensive token safety analysis powered by x402",
+    endpoints: {
+      health: "/health",
+      manifest: "/.well-known/agent.json",
+      entrypoint: "/entrypoints/check-token-safety/invoke",
+    },
+    supported_chains: Object.entries(CHAIN_NAMES).map(([id, name]) => ({
+      id: parseInt(id),
+      name,
+    })),
+    payment: {
+      network: NETWORK,
+      price_usdc: (DEFAULT_PRICE / 1000000).toFixed(2),
+    },
   });
-  
-  console.log(`✅ Server running at http://localhost:${port}`);
-  console.log(`📖 API docs: http://localhost:${port}/.well-known/agent.json`);
-  console.log(`❤️  Health check: http://localhost:${port}/health\n`);
-}
+});
+
+// Start server
+console.log(`\n🚀 Token Safety Check starting on port ${PORT}...`);
+console.log(`📊 Supported chains: ${Object.values(CHAIN_NAMES).join(", ")}`);
+console.log(`💰 Payment: ${(DEFAULT_PRICE / 1000000).toFixed(2)} USDC via x402 on ${NETWORK}`);
+console.log(`\n✅ Server running at http://localhost:${PORT}\n`);
+
+export default {
+  port: PORT,
+  fetch: app.fetch,
+};
